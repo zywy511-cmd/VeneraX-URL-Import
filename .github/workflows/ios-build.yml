@@ -1,0 +1,128 @@
+name: iOS Build
+
+on:
+  workflow_dispatch:
+    inputs:
+      flavor:
+        description: 'Build flavor'
+        required: false
+        default: 'release'
+        type: choice
+        options:
+          - release
+          - debug
+  push:
+    branches:
+      - main
+      - master
+    paths-ignore:
+      - '**.md'
+      - 'docs/**'
+
+env:
+  FLUTTER_VERSION: '3.24.0'
+  APP_NAME: 'VeneraX'
+  APP_VERSION: '2.0.10'
+
+jobs:
+  build-ios:
+    name: Build iOS IPA
+    runs-on: macos-14
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          channel: 'stable'
+          cache: true
+
+      - name: Flutter version check
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify formatting
+        run: dart format --set-exit-if-changed .
+        continue-on-error: true
+
+      - name: Analyze project source
+        run: flutter analyze
+        continue-on-error: true
+
+      - name: Set up CocoaPods
+        uses: maxim-lobanov/setup-cocoapods@v1
+        with:
+          version: latest
+
+      - name: Install iOS dependencies
+        run: |
+          cd ios
+          pod install
+          cd ..
+
+      - name: Build iOS (no codesign)
+        run: |
+          flutter build ios --release --no-codesign
+          
+          # Create IPA structure
+          cd build/ios/iphoneos
+          mkdir -p Payload
+          cp -R Runner.app Payload/
+          
+          # Create IPA
+          zip -qr ../../../VeneraX_${{ env.APP_VERSION }}_no_codesign.ipa Payload
+          cd ../../..
+          
+          # Also create a tar.gz of the entire build output
+          tar -czf VeneraX_${{ env.APP_VERSION }}_ios_build.tar.gz build/ios/
+
+      - name: List build outputs
+        run: |
+          ls -lh *.ipa *.tar.gz 2>/dev/null || true
+          ls -lh build/ios/ 2>/dev/null || true
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VeneraX_${{ env.APP_VERSION }}_iOS_IPA
+          path: VeneraX_${{ env.APP_VERSION }}_no_codesign.ipa
+          retention-days: 30
+
+      - name: Upload full build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: VeneraX_${{ env.APP_VERSION }}_iOS_Build
+          path: VeneraX_${{ env.APP_VERSION }}_ios_build.tar.gz
+          retention-days: 7
+
+      - name: Upload dSYM artifacts (if available)
+        uses: actions/upload-artifact@v4
+        with:
+          name: VeneraX_${{ env.APP_VERSION }}_dSYM
+          path: build/ios/iphoneos/*.dSYM
+          retention-days: 7
+        continue-on-error: true
+
+      - name: Build summary
+        run: |
+          echo "## iOS Build Complete 🎉" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**App Version:** ${{ env.APP_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Flutter Version:** ${{ env.FLUTTER_VERSION }}" >> $GITHUB_STEP_SUMMARY
+          echo "**Build Type:** Release (No Codesign)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Download Artifacts" >> $GITHUB_STEP_SUMMARY
+          echo "- **IPA File**: VeneraX_${{ env.APP_VERSION }}_iOS_IPA (保留30天)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Full Build**: VeneraX_${{ env.APP_VERSION }}_iOS_Build (保留7天)" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### 安装说明" >> $GITHUB_STEP_SUMMARY
+          echo "下载的 IPA 为未签名版本，需要使用以下工具侧载安装：" >> $GITHUB_STEP_SUMMARY
+          echo "- AltStore (推荐)" >> $GITHUB_STEP_SUMMARY
+          echo "- Sideloadly" >> $GITHUB_STEP_SUMMARY
+          echo "- TrollStore (支持iOS 15.0-16.6.1)" >> $GITHUB_STEP_SUMMARY

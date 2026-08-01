@@ -59,6 +59,106 @@ class _AppSettingsState extends State<AppSettings> {
     );
   }
 
+  Future<void> _importFromUrl(String url) async {
+    var controller = showLoadingDialog(
+      context,
+      barrierDismissible: false,
+      allowCancel: false,
+      message: "Downloading...".tl,
+    );
+    try {
+      var dio = AppDio();
+      var savePath = FilePath.join(App.cachePath, "url_import_temp.venera");
+      var saveFile = File(savePath);
+      
+      // Delete if exists
+      if (await saveFile.exists()) {
+        await saveFile.delete();
+      }
+      
+      // Download the file
+      await dio.download(
+        url,
+        savePath,
+        options: Options(
+          responseType: ResponseType.bytes,
+          receiveTimeout: const Duration(minutes: 5),
+          sendTimeout: const Duration(minutes: 5),
+        ),
+        onReceiveProgress: (received, total) {
+          if (total > 0) {
+            controller.setMessage(
+              "Downloading... @%".tlParams({
+                '@': (received / total * 100).toStringAsFixed(0),
+              }),
+            );
+            controller.setProgress(received / total);
+          }
+        },
+      );
+      
+      // Check if file was downloaded successfully
+      if (!await saveFile.exists() || await saveFile.length() == 0) {
+        throw Exception("Downloaded file is empty");
+      }
+      
+      controller.setMessage("Importing data...".tl);
+      controller.setProgress(null);
+      
+      // Import the data using existing import logic
+      await importAppData(saveFile);
+      
+      // Upload to sync if needed (same as manual import)
+      unawaited(DataSync().uploadData());
+      
+      controller.close();
+      if (mounted) {
+        context.showMessage(message: "Data imported successfully".tl);
+      }
+    } on DioException catch (e, s) {
+      Log.error("Import from URL", "Dio error: ${e.message}", s);
+      controller.close();
+      if (mounted) {
+        String errorMsg;
+        switch (e.type) {
+          case DioExceptionType.connectionTimeout:
+          case DioExceptionType.sendTimeout:
+          case DioExceptionType.receiveTimeout:
+            errorMsg = "Connection timeout. Please check your network and try again.".tl;
+            break;
+          case DioExceptionType.badResponse:
+            errorMsg = "Server error: @code".tlParams({
+              '@code': e.response?.statusCode?.toString() ?? 'Unknown',
+            });
+            break;
+          case DioExceptionType.unknown:
+            errorMsg = "Download failed: @error".tlParams({
+              '@error': e.message ?? 'Unknown error',
+            });
+            break;
+          default:
+            errorMsg = "Download failed: @error".tlParams({
+              '@error': e.message ?? 'Unknown error',
+            });
+        }
+        context.showMessage(message: errorMsg);
+      }
+    } catch (e, s) {
+      Log.error("Import from URL", e.toString(), s);
+      controller.close();
+      if (mounted) {
+        context.showMessage(message: "Failed to import data".tl);
+      }
+    } finally {
+      // Clean up temp file
+      var tempFile = File(FilePath.join(App.cachePath, "url_import_temp.venera"));
+      if (await tempFile.exists()) {
+        tempFile.deleteIgnoreError();
+      }
+      App.forceRebuild();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
@@ -187,6 +287,38 @@ class _AppSettingsState extends State<AppSettings> {
               }
             }
             controller.close();
+          },
+          actionTitle: 'Import'.tl,
+        ).toSliver(),
+        _CallbackSetting(
+          title: "Import from URL".tl,
+          subtitle: "Import data from a direct download link".tl,
+          callback: () async {
+            showInputDialog(
+              context: context,
+              title: "Import from URL".tl,
+              hintText: "Paste the download link of the data file".tl,
+              confirmText: "Import".tl,
+              onConfirm: (url) async {
+                url = url.trim();
+                if (url.isEmpty) {
+                  return "URL cannot be empty".tl;
+                }
+                // Validate URL format
+                Uri? uri;
+                try {
+                  uri = Uri.parse(url);
+                  if (!uri.hasScheme || (!uri.isScheme('http') && !uri.isScheme('https'))) {
+                    return "Please enter a valid HTTP/HTTPS URL".tl;
+                  }
+                } catch (e) {
+                  return "Invalid URL format".tl;
+                }
+                // Start download and import
+                _importFromUrl(url);
+                return null;
+              },
+            );
           },
           actionTitle: 'Import'.tl,
         ).toSliver(),
