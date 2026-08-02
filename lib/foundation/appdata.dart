@@ -284,7 +284,7 @@ class Settings with ChangeNotifier {
     'downloadThreads': 5,
     'enableLongPressToZoom': true,
     'longPressZoomPosition': "press", // press, center
-    'checkUpdateOnStart': true,
+    'checkUpdateOnStart': false,
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
     "disableSyncFields": "", // "field1, field2, ..."
