@@ -67,7 +67,20 @@ class _AppSettingsState extends State<AppSettings> {
       message: "Downloading...".tl,
     );
     try {
-      var dio = AppDio();
+      // Use a clean Dio instance for file download to avoid interference
+      // from app-specific interceptors (Cloudflare, cache, etc.)
+      var dio = Dio(BaseOptions(
+        followRedirects: true,
+        maxRedirects: 5,
+        connectTimeout: const Duration(seconds: 30),
+        receiveTimeout: const Duration(minutes: 5),
+        sendTimeout: const Duration(minutes: 5),
+        headers: {
+          'User-Agent': 'VeneraX/2.0.10 (URL Import)',
+          'Accept': '*/*',
+        },
+      ));
+
       var savePath = FilePath.join(App.cachePath, "url_import_temp.venera");
       var saveFile = File(savePath);
       
@@ -76,14 +89,16 @@ class _AppSettingsState extends State<AppSettings> {
         await saveFile.delete();
       }
       
+      Log.info("Import from URL", "Starting download from: $url");
+      
       // Download the file
       await dio.download(
         url,
         savePath,
         options: Options(
           responseType: ResponseType.bytes,
-          receiveTimeout: const Duration(minutes: 5),
-          sendTimeout: const Duration(minutes: 5),
+          followRedirects: true,
+          validateStatus: (status) => status! >= 200 && status < 400,
         ),
         onReceiveProgress: (received, total) {
           if (total > 0) {
@@ -93,14 +108,27 @@ class _AppSettingsState extends State<AppSettings> {
               }),
             );
             controller.setProgress(received / total);
+          } else {
+            controller.setMessage(
+              "Downloading... @bytes".tlParams({
+                '@bytes': bytesToReadableString(received),
+              }),
+            );
           }
         },
       );
       
       // Check if file was downloaded successfully
-      if (!await saveFile.exists() || await saveFile.length() == 0) {
-        throw Exception("Downloaded file is empty");
+      if (!await saveFile.exists()) {
+        throw Exception("Downloaded file does not exist");
       }
+      
+      var fileSize = await saveFile.length();
+      if (fileSize == 0) {
+        throw Exception("Downloaded file is empty (0 bytes)");
+      }
+      
+      Log.info("Import from URL", "Download complete, file size: $fileSize bytes");
       
       controller.setMessage("Importing data...".tl);
       controller.setProgress(null);
@@ -116,7 +144,10 @@ class _AppSettingsState extends State<AppSettings> {
         context.showMessage(message: "Data imported successfully".tl);
       }
     } on DioException catch (e, s) {
-      Log.error("Import from URL", "Dio error: ${e.message}", s);
+      Log.error("Import from URL", "Dio error: ${e.type} - ${e.message}", s);
+      Log.error("Import from URL", "Response status: ${e.response?.statusCode}");
+      Log.error("Import from URL", "Response headers: ${e.response?.headers.toString()}");
+      
       controller.close();
       if (mounted) {
         String errorMsg;
@@ -127,27 +158,46 @@ class _AppSettingsState extends State<AppSettings> {
             errorMsg = "Connection timeout. Please check your network and try again.".tl;
             break;
           case DioExceptionType.badResponse:
-            errorMsg = "Server error: @code".tlParams({
-              '@code': e.response?.statusCode?.toString() ?? 'Unknown',
-            });
+            var statusCode = e.response?.statusCode ?? 0;
+            if (statusCode == 404) {
+              errorMsg = "File not found (404). Please check if the URL is correct.".tl;
+            } else if (statusCode == 403) {
+              errorMsg = "Access denied (403). The server refused the request.".tl;
+            } else if (statusCode == 302 || statusCode == 301) {
+              errorMsg = "Too many redirects. Please check if the URL is valid.".tl;
+            } else {
+              errorMsg = "Server error: @code".tlParams({
+                '@code': statusCode.toString(),
+              });
+            }
+            break;
+          case DioExceptionType.connectionError:
+            errorMsg = "Connection failed. Please check your network and try again.".tl;
+            break;
+          case DioExceptionType.receiveTimeout:
+            errorMsg = "Download timed out. The server is too slow or the file is too large.".tl;
             break;
           case DioExceptionType.unknown:
             errorMsg = "Download failed: @error".tlParams({
-              '@error': e.message ?? 'Unknown error',
+              '@error': e.message?.toString() ?? 'Unknown error',
             });
             break;
           default:
             errorMsg = "Download failed: @error".tlParams({
-              '@error': e.message ?? 'Unknown error',
+              '@error': e.message?.toString() ?? 'Unknown error',
             });
         }
         context.showMessage(message: errorMsg);
       }
     } catch (e, s) {
-      Log.error("Import from URL", e.toString(), s);
+      Log.error("Import from URL", "Error: ${e.toString()}", s);
       controller.close();
       if (mounted) {
-        context.showMessage(message: "Failed to import data".tl);
+        context.showMessage(
+          message: "Failed to import data: @error".tlParams({
+            '@error': e.toString().substring(0, e.toString().length > 100 ? 100 : e.toString().length),
+          }),
+        );
       }
     } finally {
       // Clean up temp file
