@@ -15,9 +15,12 @@ workflows:
           flutter pub get
           cd ios && pod install && cd ..
           
-      - name: Build iOS with xcodebuild (bypass Flutter signature check)
+      - name: Build iOS with xcodebuild
         script: |
-          # 直接用xcodebuild构建，绕过Flutter的签名检查
+          set -e  # 出错就停止
+          
+          echo "=== Starting xcodebuild ==="
+          
           xcodebuild -workspace ios/Runner.xcworkspace \
             -scheme Runner \
             -configuration Release \
@@ -26,20 +29,36 @@ workflows:
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
-            -derivedDataPath build/ios_derived \
-            -quiet
+            -derivedDataPath build/ios_derived
           
-          # 找到.app文件
+          echo "=== xcodebuild finished ==="
+          
+          # 查找.app文件
+          echo "=== Searching for .app file ==="
+          find build/ios_derived -name "Runner.app" -type d
+          
           APP_PATH=$(find build/ios_derived -name "Runner.app" -type d | head -1)
+          
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: Runner.app not found!"
+            echo "=== Build directory contents ==="
+            ls -la build/ios_derived/
+            find build/ios_derived -name "*.app" -type d
+            exit 1
+          fi
+          
           echo "App found at: $APP_PATH"
+          echo "App size: $(du -sh "$APP_PATH" | cut -f1)"
           
           # 创建IPA
+          echo "=== Creating IPA ==="
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -qr VeneraX_no_codesign.ipa Payload
           rm -rf Payload
           
           echo "IPA created successfully"
+          echo "IPA size: $(du -sh VeneraX_no_codesign.ipa | cut -f1)"
           ls -lh VeneraX_no_codesign.ipa
           
     artifacts:
