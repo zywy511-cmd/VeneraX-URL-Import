@@ -9,29 +9,38 @@ workflows:
       vars:
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"
-        CODE_SIGN_IDENTITY: "-"
     scripts:
-      - name: Set up fake development team
-        script: |
-          # 绕过Flutter签名检查，设置一个假的Development Team
-          sed -i '' 's/DEVELOPMENT_TEAM = "";/DEVELOPMENT_TEAM = "AAAAAAAAAA";/g' ios/Runner.xcodeproj/project.pbxproj
-          sed -i '' 's/DEVELOPMENT_TEAM = [A-Z0-9]*;/DEVELOPMENT_TEAM = "AAAAAAAAAA";/g' ios/Runner.xcodeproj/project.pbxproj
-          
       - name: Install dependencies
         script: |
           flutter pub get
           cd ios && pod install && cd ..
           
-      - name: Build iOS IPA
+      - name: Build iOS with xcodebuild (bypass Flutter signature check)
         script: |
-          flutter build ios --release --no-codesign
+          # 直接用xcodebuild构建，绕过Flutter的签名检查
+          xcodebuild -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -sdk iphoneos \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            -derivedDataPath build/ios_derived \
+            -quiet
           
-          # 手动创建IPA
-          cd build/ios/iphoneos
+          # 找到.app文件
+          APP_PATH=$(find build/ios_derived -name "Runner.app" -type d | head -1)
+          echo "App found at: $APP_PATH"
+          
+          # 创建IPA
           mkdir -p Payload
-          cp -R Runner.app Payload/
-          zip -qr ../../../VeneraX_no_codesign.ipa Payload
-          cd ../../..
+          cp -R "$APP_PATH" Payload/
+          zip -qr VeneraX_no_codesign.ipa Payload
+          rm -rf Payload
+          
+          echo "IPA created successfully"
+          ls -lh VeneraX_no_codesign.ipa
           
     artifacts:
       - VeneraX_no_codesign.ipa
