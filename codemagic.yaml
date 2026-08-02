@@ -1,7 +1,7 @@
 workflows:
   ios-build:
     name: iOS Build (No Code Sign)
-    max_build_duration: 30
+    max_build_duration: 45
     instance_type: mac_mini_m2
     environment:
       flutter: 3.41.4
@@ -10,14 +10,27 @@ workflows:
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGNING_ALLOWED: "NO"
     scripts:
+      - name: Install Rust toolchain
+        script: |
+          echo "=== Installing Rust ==="
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-apple-ios
+          rustup target add x86_64-apple-ios
+          rustc --version
+          cargo --version
+          echo "=== Rust installed ==="
+          
       - name: Install dependencies
         script: |
+          source "$HOME/.cargo/env"
           flutter pub get
           cd ios && pod install && cd ..
           
       - name: Build iOS with xcodebuild
         script: |
-          set -e  # 出错就停止
+          set -e
+          source "$HOME/.cargo/env"
           
           echo "=== Starting xcodebuild ==="
           
@@ -34,15 +47,10 @@ workflows:
           echo "=== xcodebuild finished ==="
           
           # 查找.app文件
-          echo "=== Searching for .app file ==="
-          find build/ios_derived -name "Runner.app" -type d
-          
           APP_PATH=$(find build/ios_derived -name "Runner.app" -type d | head -1)
           
           if [ -z "$APP_PATH" ]; then
             echo "ERROR: Runner.app not found!"
-            echo "=== Build directory contents ==="
-            ls -la build/ios_derived/
             find build/ios_derived -name "*.app" -type d
             exit 1
           fi
@@ -51,7 +59,6 @@ workflows:
           echo "App size: $(du -sh "$APP_PATH" | cut -f1)"
           
           # 创建IPA
-          echo "=== Creating IPA ==="
           mkdir -p Payload
           cp -R "$APP_PATH" Payload/
           zip -qr VeneraX_no_codesign.ipa Payload
@@ -59,7 +66,6 @@ workflows:
           
           echo "IPA created successfully"
           echo "IPA size: $(du -sh VeneraX_no_codesign.ipa | cut -f1)"
-          ls -lh VeneraX_no_codesign.ipa
           
     artifacts:
       - VeneraX_no_codesign.ipa
