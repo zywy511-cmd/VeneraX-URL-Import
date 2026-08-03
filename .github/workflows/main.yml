@@ -129,6 +129,15 @@ jobs:
         with:
           distribution: 'oracle'
           java-version: '17'
+      - name: Install Rust toolchain
+        run: |
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          echo "$HOME/.cargo/bin" >> $GITHUB_PATH
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+          rustc --version
+          cargo --version
       - name: Check rust-toolchain.toml
         run: rustup show
       - run: flutter pub get

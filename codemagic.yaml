@@ -76,3 +76,64 @@ workflows:
       branch_patterns:
         - pattern: main
           include: true
+
+  android-build:
+    name: Android Build
+    max_build_duration: 45
+    instance_type: mac_mini_m2
+    environment:
+      flutter: 3.41.4
+      android_signing:
+        - keystore_reference
+      vars:
+        PACKAGE_NAME: "io.github.kyosee.venera"
+    scripts:
+      - name: Install Rust toolchain
+        script: |
+          echo "=== Installing Rust ==="
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
+          source "$HOME/.cargo/env"
+          rustup target add aarch64-linux-android
+          rustup target add armv7-linux-androideabi
+          rustup target add x86_64-linux-android
+          rustc --version
+          cargo --version
+          echo "=== Rust installed ==="
+          
+      - name: Install dependencies
+        script: |
+          source "$HOME/.cargo/env"
+          flutter pub get
+          
+      - name: Set up keystore
+        script: |
+          echo "=== Setting up Android keystore ==="
+          echo $CM_KEYSTORE | base64 --decode > $CM_BUILD_DIR/android/keystore.jks
+          cat >> $CM_BUILD_DIR/android/key.properties <<EOF
+          storePassword=$CM_KEYSTORE_PASSWORD
+          keyPassword=$CM_KEY_PASSWORD
+          keyAlias=$CM_KEY_ALIAS
+          storeFile=keystore.jks
+          EOF
+          echo "=== Keystore configured ==="
+          
+      - name: Build Android APK
+        script: |
+          set -e
+          source "$HOME/.cargo/env"
+          
+          echo "=== Building Android APK ==="
+          flutter build apk --release
+          
+          echo "=== Build complete ==="
+          ls -lh build/app/outputs/apk/release/
+          
+    artifacts:
+      - build/app/outputs/apk/release/*.apk
+      
+    triggering:
+      events:
+        - push
+      branch_patterns:
+        - pattern: main
+          include: true
