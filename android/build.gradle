@@ -1,18 +1,40 @@
+// 修复：修改 Gradle 进程的 PATH 环境变量，添加 Rust 路径
+def rustBin = new File(System.getProperty("user.home"), ".cargo/bin").absolutePath
+def currentPath = System.getenv("PATH") ?: ""
+if (!currentPath.contains(rustBin) && new File(rustBin).exists()) {
+    try {
+        // 通过反射修改环境变量（兼容不同 JDK 版本）
+        def env = System.getenv()
+        try {
+            // JDK 8: 修改 m 字段
+            def field = env.getClass().getDeclaredField("m")
+            field.setAccessible(true)
+            def map = field.get(env)
+            map.put("PATH", rustBin + ":" + currentPath)
+        } catch (NoSuchFieldException e1) {
+            try {
+                // JDK 9+: 修改 theUnmodifiableEnvironment 中的 map
+                def field = env.getClass().getDeclaredField("theUnmodifiableEnvironment")
+                field.setAccessible(true)
+                def unmodifiableEnv = field.get(null)
+                def mField = unmodifiableEnv.getClass().getDeclaredField("m")
+                mField.setAccessible(true)
+                def map = mField.get(unmodifiableEnv)
+                map.put("PATH", rustBin + ":" + currentPath)
+            } catch (Exception e2) {
+                println "Rust PATH fix: reflection method 2 failed: ${e2.message}"
+            }
+        }
+        println "Rust PATH fix applied: ${rustBin}"
+    } catch (Exception e) {
+        println "Rust PATH fix failed: ${e.message}"
+    }
+}
+
 allprojects {
     repositories {
         google()
         mavenCentral()
-    }
-
-    // 修复：为 cargokit 任务添加 Rust 路径
-    tasks.withType(Exec).configureEach { task ->
-        if (task.name.toLowerCase().contains('cargokit')) {
-            def rustBin = new File(System.getProperty("user.home"), ".cargo/bin").absolutePath
-            def currentPath = System.getenv("PATH") ?: ""
-            if (!currentPath.contains(rustBin)) {
-                task.environment("PATH", rustBin + ":" + currentPath)
-            }
-        }
     }
 }
 
