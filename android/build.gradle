@@ -1,33 +1,71 @@
-// 修复：修改 Gradle 进程的 PATH 环境变量，添加 Rust 路径
-def rustBin = new File(System.getProperty("user.home"), ".cargo/bin").absolutePath
-def currentPath = System.getenv("PATH") ?: ""
-if (!currentPath.contains(rustBin) && new File(rustBin).exists()) {
-    try {
-        // 通过反射修改环境变量（兼容不同 JDK 版本）
-        def env = System.getenv()
+// 修复：自动安装 Rust 并设置 PATH
+def rustBinDir = new File(System.getProperty("user.home"), ".cargo/bin")
+def rustupBin = new File(rustBinDir, "rustup")
+
+if (!rustupBin.exists()) {
+    println "Rust not found, installing..."
+    def installCmd = [
+        "bash", "-c",
+        "curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal"
+    ]
+    def proc = installCmd.execute()
+    proc.waitForProcessOutput(System.out, System.err)
+    if (proc.exitValue() != 0) {
+        println "Rust installation failed with exit code: ${proc.exitValue()}"
+    } else {
+        println "Rust installed successfully"
+    }
+}
+
+// 设置 PATH 环境变量（通过反射）
+if (rustBinDir.exists()) {
+    def rustBin = rustBinDir.absolutePath
+    def currentPath = System.getenv("PATH") ?: ""
+    if (!currentPath.contains(rustBin)) {
         try {
-            // JDK 8: 修改 m 字段
-            def field = env.getClass().getDeclaredField("m")
-            field.setAccessible(true)
-            def map = field.get(env)
-            map.put("PATH", rustBin + ":" + currentPath)
-        } catch (NoSuchFieldException e1) {
+            def env = System.getenv()
+            // 尝试不同的反射方式
             try {
-                // JDK 9+: 修改 theUnmodifiableEnvironment 中的 map
-                def field = env.getClass().getDeclaredField("theUnmodifiableEnvironment")
+                def field = env.getClass().getDeclaredField("m")
                 field.setAccessible(true)
-                def unmodifiableEnv = field.get(null)
-                def mField = unmodifiableEnv.getClass().getDeclaredField("m")
-                mField.setAccessible(true)
-                def map = mField.get(unmodifiableEnv)
+                def map = field.get(env)
                 map.put("PATH", rustBin + ":" + currentPath)
-            } catch (Exception e2) {
-                println "Rust PATH fix: reflection method 2 failed: ${e2.message}"
+            } catch (NoSuchFieldException e1) {
+                try {
+                    def field = env.getClass().getDeclaredField("theUnmodifiableEnvironment")
+                    field.setAccessible(true)
+                    def unmodifiableEnv = field.get(null)
+                    def mField = unmodifiableEnv.getClass().getDeclaredField("m")
+                    mField.setAccessible(true)
+                    def map = mField.get(unmodifiableEnv)
+                    map.put("PATH", rustBin + ":" + currentPath)
+                } catch (Exception e2) {
+                    println "PATH reflection method 2 failed: ${e2.message}"
+                }
             }
+            println "Rust PATH added: ${rustBin}"
+        } catch (Exception e) {
+            println "PATH fix failed: ${e.message}"
         }
-        println "Rust PATH fix applied: ${rustBin}"
-    } catch (Exception e) {
-        println "Rust PATH fix failed: ${e.message}"
+    }
+}
+
+// 安装 Android targets
+if (rustupBin.exists()) {
+    println "Installing Android Rust targets..."
+    def targetCmd = [
+        rustupBin.absolutePath,
+        "target", "add",
+        "aarch64-linux-android",
+        "armv7-linux-androideabi",
+        "x86_64-linux-android"
+    ]
+    def proc = targetCmd.execute()
+    proc.waitForProcessOutput(System.out, System.err)
+    if (proc.exitValue() != 0) {
+        println "Rust target installation failed with exit code: ${proc.exitValue()}"
+    } else {
+        println "Rust Android targets installed successfully"
     }
 }
 
