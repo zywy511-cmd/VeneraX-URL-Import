@@ -3,6 +3,17 @@ allprojects {
         google()
         mavenCentral()
     }
+
+    // 修复：为 cargokit 任务添加 Rust 路径
+    tasks.withType(Exec).configureEach { task ->
+        if (task.name.toLowerCase().contains('cargokit')) {
+            def rustBin = new File(System.getProperty("user.home"), ".cargo/bin").absolutePath
+            def currentPath = System.getenv("PATH") ?: ""
+            if (!currentPath.contains(rustBin)) {
+                task.environment("PATH", rustBin + ":" + currentPath)
+            }
+        }
+    }
 }
 
 rootProject.buildDir = "../build"
